@@ -22,14 +22,45 @@ class AudioEngine:
 
     def start_monitoring(self, device_index=None):
         self.is_monitoring = True
-        # Usamos Stream (In/Out) para permitir ouvir o áudio processado
-        self.stream = sd.Stream(
-            device=device_index,
-            channels=self.channels,
-            samplerate=self.samplerate,
-            callback=self._audio_callback
-        )
+        
+        if device_index is None:
+            device_index = sd.default.device[0]
+            
+        device_info = sd.query_devices(device_index)
+        
+        # Usar samplerate do dispositivo se o padrão falhar
+        samplerate = int(device_info.get('default_samplerate', self.samplerate))
+        
+        # Lógica de canais ultra-compatível
+        max_in = device_info['max_input_channels']
+        max_out = device_info['max_output_channels']
+        
+        # Se max_out for 0 (dispositivo só de entrada), usamos sd.InputStream
+        if max_out == 0:
+            self.stream = sd.InputStream(
+                device=device_index,
+                channels=min(self.channels, max_in),
+                samplerate=samplerate,
+                callback=self._input_only_callback
+            )
+        else:
+            # Stream Duplex (In/Out)
+            in_channels = min(self.channels, max_in)
+            # Alguns drivers bugam se pedir mais canais do que o max_out
+            out_channels = min(in_channels, max_out) if max_out < 2 else min(2, max_out)
+            
+            self.stream = sd.Stream(
+                device=device_index,
+                channels=(in_channels, out_channels),
+                samplerate=samplerate,
+                callback=self._audio_callback
+            )
+        
         self.stream.start()
+
+    def _input_only_callback(self, indata, frames, time, status):
+        """Fallback para quando não há saída disponível no dispositivo selecionado"""
+        self._audio_callback(indata, None, frames, time, status)
 
     def stop_monitoring(self):
         self.is_monitoring = False
@@ -58,8 +89,12 @@ class AudioEngine:
         # Processamento em tempo real
         processed = self.processor.process(indata)
         
-        # Copia para a saída (monitoramento audível)
-        outdata[:] = processed
+        # Se tivermos outdata (Stream Duplex), copiamos o áudio processado
+        if outdata is not None:
+            if outdata.shape[1] > processed.shape[1]:
+                outdata[:] = np.repeat(processed, outdata.shape[1], axis=1)
+            else:
+                outdata[:] = processed[:, :outdata.shape[1]]
         
         # Calcula volume para o medidor
         self.current_volume = np.linalg.norm(processed) / np.sqrt(len(processed))

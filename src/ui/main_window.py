@@ -153,13 +153,20 @@ class MainWindow(QMainWindow):
                 self.device_combo.addItem(dev['name'], i)
 
     def toggle_monitoring(self):
+        from PyQt6.QtWidgets import QMessageBox
         if not self.audio_engine.is_monitoring:
-            idx = self.device_combo.currentData()
-            self.audio_engine.start_monitoring(device_index=idx)
-            self.test_btn.setText("Parar Teste")
+            try:
+                idx = self.device_combo.currentData()
+                self.audio_engine.start_monitoring(device_index=idx)
+                self.test_btn.setText("Parar Teste")
+                self.test_btn.setStyleSheet(f"background-color: {COLOR_NEON_GREEN}; color: black;")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro de Áudio", f"Não foi possível iniciar o monitoramento:\n{str(e)}")
+                self.audio_engine.stop_monitoring()
         else:
             self.audio_engine.stop_monitoring()
             self.test_btn.setText("Modo de Teste")
+            self.test_btn.setStyleSheet(f"background-color: {COLOR_EMERALD}; color: {COLOR_BACKGROUND};")
 
     def toggle_recording(self):
         if not self.audio_engine.is_recording:

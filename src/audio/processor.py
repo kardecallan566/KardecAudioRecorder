@@ -1,6 +1,9 @@
 import numpy as np
 from scipy import signal
 
+import librosa
+import pyrubberband as pyrb
+
 class AudioProcessor:
     def __init__(self):
         self.enabled_filters = {
@@ -10,14 +13,16 @@ class AudioProcessor:
             "bass_boost": False,
             "clarity": False,
             "limiter": False,
-            "normalization": False
+            "normalization": False,
+            "autotune": False
         }
         self.params = {
             "noise_reduction_level": 0.5,
             "gain": 1.0,
             "bass": 1.0,
             "mid": 1.0,
-            "treble": 1.0
+            "treble": 1.0,
+            "pitch_shift": 0.0, # em semitons
         }
 
     def process(self, data):
@@ -44,24 +49,33 @@ class AudioProcessor:
 
         return processed_data
 
-    def _apply_equalizer(self, data):
-        # Implementação de filtros de prateleira para graves e agudos
-        fs = 44100
+    def _apply_equalizer(self, data, fs=44100):
         processed = data.copy()
         
-        if self.enabled_filters["bass_boost"]:
-            # Filtro passa-baixa simples para reforço de graves
-            b, a = signal.butter(2, 200, 'low', fs=fs)
-            bass = signal.lfilter(b, a, processed, axis=0)
-            processed += bass * 0.5
-            
-        if self.enabled_filters["clarity"]:
-            # Filtro passa-alta para clareza (presença)
-            b, a = signal.butter(2, 3000, 'high', fs=fs)
-            treble = signal.lfilter(b, a, processed, axis=0)
-            processed += treble * 0.3
+        # Bass (Graves)
+        if self.params["bass"] != 1.0:
+            b, a = signal.butter(2, 250, 'low', fs=fs)
+            bass_part = signal.lfilter(b, a, processed, axis=0)
+            processed = processed + bass_part * (self.params["bass"] - 1.0)
+
+        # Treble (Agudos)
+        if self.params["treble"] != 1.0:
+            b, a = signal.butter(2, 4000, 'high', fs=fs)
+            treble_part = signal.lfilter(b, a, processed, axis=0)
+            processed = processed + treble_part * (self.params["treble"] - 1.0)
             
         return processed
+
+    def apply_pitch_shift(self, data, sr, n_steps):
+        if n_steps == 0:
+            return data
+        return librosa.effects.pitch_shift(y=data, sr=sr, n_steps=n_steps)
+
+    def apply_autotune(self, data, sr):
+        # Implementação simplificada de correção de tom (Auto-tune)
+        # Em um cenário real, isso requer detecção de pitch e correção para a nota mais próxima
+        # Aqui usaremos um efeito de "vibrato" ou correção leve se habilitado
+        return data # Placeholder para lógica complexa de autotune
 
     def _apply_compressor(self, data, threshold=0.3, ratio=4.0):
         # Compressor básico: se acima do threshold, reduz o volume

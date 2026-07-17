@@ -1,11 +1,14 @@
 from PyQt6.QtWidgets import (QMainWindow, QWidget, QHBoxLayout, QVBoxLayout, 
-                             QPushButton, QLabel, QComboBox, QSlider, QFrame, QProgressBar)
+                             QPushButton, QLabel, QComboBox, QSlider, QFrame, QProgressBar, QMessageBox)
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QColor, QPalette
 import pyqtgraph as pg
 from src.utils.constants import *
 from src.audio.engine import AudioEngine
 from src.ui.audio_editor import AudioEditor
+import os
+from datetime import datetime
+import sounddevice as sd
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -17,17 +20,16 @@ class MainWindow(QMainWindow):
         self.setup_ui()
         self.apply_styles()
         
-        # Timer para atualizar visualização
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_visuals)
-        self.timer.start(30) # 30ms (~33 FPS)
+        self.timer.start(30)
 
     def setup_ui(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
         layout = QHBoxLayout(main_widget)
 
-        # 1. Painel Lateral Esquerdo (Configurações)
+        # Left Panel
         left_panel = QVBoxLayout()
         left_frame = QFrame()
         left_frame.setLayout(left_panel)
@@ -54,23 +56,19 @@ class MainWindow(QMainWindow):
         
         left_panel.addStretch()
         
-        # 2. Área Central (Monitoramento)
+        # Center Panel
         center_panel = QVBoxLayout()
-        
-        # Gráfico de Onda
         self.plot_widget = pg.PlotWidget()
         self.plot_widget.setBackground(COLOR_BACKGROUND)
         self.curve = self.plot_widget.plot(pen=pg.mkPen(COLOR_NEON_GREEN, width=2))
         self.plot_widget.setYRange(-1, 1)
         center_panel.addWidget(self.plot_widget)
         
-        # Medidor de Volume
         self.volume_bar = QProgressBar()
         self.volume_bar.setRange(0, 100)
         self.volume_bar.setTextVisible(False)
         center_panel.addWidget(self.volume_bar)
         
-        # Botões de Controle
         controls = QHBoxLayout()
         self.record_btn = QPushButton("Iniciar Gravação")
         self.record_btn.clicked.connect(self.toggle_recording)
@@ -80,15 +78,13 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.record_btn)
         center_panel.addLayout(controls)
 
-        # 3. Painel Lateral Direito (Processamento)
+        # Right Panel
         right_panel = QVBoxLayout()
         right_frame = QFrame()
         right_frame.setLayout(right_panel)
         right_frame.setFixedWidth(300)
         
         right_panel.addWidget(QLabel("PROCESSAMENTO"))
-        
-        # Filtros (Exemplo)
         self.filters = {}
         filter_list = ["Redução de Ruído", "Compressor", "Equalizador", "Limitador", "Normalização"]
         for f in filter_list:
@@ -97,14 +93,13 @@ class MainWindow(QMainWindow):
             btn.toggled.connect(lambda state, name=f: self.on_filter_toggled(name, state))
             right_panel.addWidget(btn)
             self.filters[f] = btn
-
         right_panel.addStretch()
 
         layout.addWidget(left_frame)
         layout.addLayout(center_panel)
         layout.addWidget(right_frame)
 
-        # 4. Editor Integrado (Inicia oculto)
+        # Integrated Editor
         self.editor_widget = AudioEditor()
         self.editor_widget.hide()
         self.editor_widget.close_btn.clicked.connect(self.close_editor)
@@ -112,38 +107,13 @@ class MainWindow(QMainWindow):
 
     def apply_styles(self):
         self.setStyleSheet(f"""
-            QMainWindow, QWidget {{
-                background-color: {COLOR_BACKGROUND};
-                color: {COLOR_TEXT};
-                font-family: 'Segoe UI', sans-serif;
-            }}
-            QFrame {{
-                background-color: {COLOR_DARK_GREEN};
-                border-radius: 10px;
-                padding: 10px;
-            }}
-            QPushButton {{
-                background-color: {COLOR_EMERALD};
-                color: {COLOR_BACKGROUND};
-                border: none;
-                padding: 10px;
-                border-radius: 5px;
-                font-weight: bold;
-            }}
-            QPushButton:checked {{
-                background-color: {COLOR_NEON_GREEN};
-            }}
-            QPushButton:hover {{
-                background-color: {COLOR_SOFT_GREEN};
-            }}
-            QLabel {{
-                font-size: 14px;
-                font-weight: bold;
-                margin-top: 10px;
-            }}
-            QProgressBar::chunk {{
-                background-color: {COLOR_NEON_GREEN};
-            }}
+            QMainWindow, QWidget {{ background-color: {COLOR_BACKGROUND}; color: {COLOR_TEXT}; font-family: 'Segoe UI', sans-serif; }}
+            QFrame {{ background-color: {COLOR_DARK_GREEN}; border-radius: 10px; padding: 10px; }}
+            QPushButton {{ background-color: {COLOR_EMERALD}; color: {COLOR_BACKGROUND}; border: none; padding: 10px; border-radius: 5px; font-weight: bold; }}
+            QPushButton:checked {{ background-color: {COLOR_NEON_GREEN}; }}
+            QPushButton:hover {{ background-color: {COLOR_SOFT_GREEN}; }}
+            QLabel {{ font-size: 14px; font-weight: bold; margin-top: 10px; }}
+            QProgressBar::chunk {{ background-color: {COLOR_NEON_GREEN}; }}
         """)
 
     def update_devices(self):
@@ -153,7 +123,6 @@ class MainWindow(QMainWindow):
                 self.device_combo.addItem(dev['name'], i)
 
     def toggle_monitoring(self):
-        from PyQt6.QtWidgets import QMessageBox
         if not self.audio_engine.is_monitoring:
             try:
                 idx = self.device_combo.currentData()
@@ -161,7 +130,7 @@ class MainWindow(QMainWindow):
                 self.test_btn.setText("Parar Teste")
                 self.test_btn.setStyleSheet(f"background-color: {COLOR_NEON_GREEN}; color: black;")
             except Exception as e:
-                QMessageBox.critical(self, "Erro de Áudio", f"Não foi possível iniciar o monitoramento:\n{str(e)}")
+                QMessageBox.critical(self, "Erro de Áudio", f"Erro ao iniciar monitoramento:\n{str(e)}")
                 self.audio_engine.stop_monitoring()
         else:
             self.audio_engine.stop_monitoring()
@@ -170,29 +139,33 @@ class MainWindow(QMainWindow):
 
     def toggle_recording(self):
         if not self.audio_engine.is_recording:
-            # Se não estiver monitorando, inicia para capturar áudio
             if not self.audio_engine.is_monitoring:
                 self.toggle_monitoring()
-                
             self.audio_engine.start_recording()
             self.record_btn.setText("Finalizar Gravação")
             self.record_btn.setStyleSheet("background-color: #FF4444; color: white;")
         else:
-            import os
-            from datetime import datetime
             timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
             filename = f"Gravacao_{timestamp}.wav"
-            
             filepath = self.audio_engine.stop_recording(filename)
             self.record_btn.setText("Iniciar Gravação")
             self.record_btn.setStyleSheet(f"background-color: {COLOR_EMERALD}; color: {COLOR_BACKGROUND};")
             
             if filepath and os.path.exists(filepath):
-                # Abre o editor
+                if self.audio_engine.is_monitoring:
+                    self.toggle_monitoring()
                 self.editor_widget.load_audio(filepath)
                 self.editor_widget.show()
-                self.plot_widget.hide() # Esconde monitoramento em tempo real
-                self.test_btn.setEnabled(False) # Desabilita teste enquanto edita
+                self.plot_widget.hide()
+                self.test_btn.setEnabled(False)
+                self.record_btn.setEnabled(False)
+
+    def close_editor(self):
+        self.editor_widget.hide()
+        self.plot_widget.show()
+        self.test_btn.setEnabled(True)
+        self.record_btn.setEnabled(True)
+        sd.stop()
 
     def on_gain_changed(self, value):
         self.audio_engine.processor.update_param("gain", value / 100.0)
@@ -200,41 +173,20 @@ class MainWindow(QMainWindow):
     def on_profile_changed(self, profile_name):
         profile = VOICE_PROFILES.get(profile_name)
         if profile:
-            self.audio_engine.processor.toggle_filter("noise_reduction", profile["noise_reduction"] > 0)
-            self.audio_engine.processor.toggle_filter("compressor", profile["compressor"])
-            self.audio_engine.processor.toggle_filter("bass_boost", profile["bass_boost"])
-            self.audio_engine.processor.toggle_filter("clarity", profile["clarity"])
-            # Atualiza UI se necessário
+            for f, state in [("noise_reduction", profile["noise_reduction"] > 0), ("compressor", profile["compressor"])]:
+                self.audio_engine.processor.toggle_filter(f, state)
             self.filters["Redução de Ruído"].setChecked(profile["noise_reduction"] > 0)
             self.filters["Compressor"].setChecked(profile["compressor"])
 
-    def close_editor(self):
-        self.editor_widget.hide()
-        self.plot_widget.show()
-        self.test_btn.setEnabled(True)
-        import sounddevice as sd
-        sd.stop() # Para qualquer reprodução
-
     def on_filter_toggled(self, name, state):
-        # Mapeamento simples
-        mapping = {
-            "Redução de Ruído": "noise_reduction",
-            "Compressor": "compressor",
-            "Equalizador": "equalizer",
-            "Limitador": "limiter",
-            "Normalização": "normalization"
-        }
+        mapping = {"Redução de Ruído": "noise_reduction", "Compressor": "compressor", "Equalizador": "equalizer", "Limitador": "limiter", "Normalização": "normalization"}
         self.audio_engine.processor.toggle_filter(mapping[name], state)
 
     def update_visuals(self):
         if self.audio_engine.is_monitoring:
             data = self.audio_engine.get_latest_data()
             if len(data) > 0:
-                # Achata o array para (N,) caso seja (N, 1)
-                if len(data.shape) > 1 and data.shape[1] == 1:
-                    data = data.flatten()
-                # Mostra apenas os últimos 1000 pontos para performance
+                if len(data.shape) > 1 and data.shape[1] == 1: data = data.flatten()
                 self.curve.setData(data[-1000:])
-                
-            vol = int(self.audio_engine.current_volume * 500) # Escala para visualização
+            vol = int(self.audio_engine.current_volume * 500)
             self.volume_bar.setValue(min(vol, 100))

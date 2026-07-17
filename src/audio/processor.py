@@ -45,10 +45,23 @@ class AudioProcessor:
         return processed_data
 
     def _apply_equalizer(self, data):
-        # Implementação simplificada de EQ usando filtros biquad ou FFT
-        # Para tempo real, filtros IIR são melhores
-        # Aqui apenas um exemplo de ganho em frequências
-        return data # Placeholder para implementação detalhada
+        # Implementação de filtros de prateleira para graves e agudos
+        fs = 44100
+        processed = data.copy()
+        
+        if self.enabled_filters["bass_boost"]:
+            # Filtro passa-baixa simples para reforço de graves
+            b, a = signal.butter(2, 200, 'low', fs=fs)
+            bass = signal.lfilter(b, a, processed, axis=0)
+            processed += bass * 0.5
+            
+        if self.enabled_filters["clarity"]:
+            # Filtro passa-alta para clareza (presença)
+            b, a = signal.butter(2, 3000, 'high', fs=fs)
+            treble = signal.lfilter(b, a, processed, axis=0)
+            processed += treble * 0.3
+            
+        return processed
 
     def _apply_compressor(self, data, threshold=0.3, ratio=4.0):
         # Compressor básico: se acima do threshold, reduz o volume

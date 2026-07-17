@@ -22,7 +22,8 @@ class AudioEngine:
 
     def start_monitoring(self, device_index=None):
         self.is_monitoring = True
-        self.stream = sd.InputStream(
+        # Usamos Stream (In/Out) para permitir ouvir o áudio processado
+        self.stream = sd.Stream(
             device=device_index,
             channels=self.channels,
             samplerate=self.samplerate,
@@ -43,17 +44,22 @@ class AudioEngine:
     def stop_recording(self, filename):
         self.is_recording = False
         if self.recorded_data:
-            full_data = np.concatenate(self.recorded_data, axis=0)
+            # Concatenar todos os blocos gravados
+            full_data = np.vstack(self.recorded_data)
             sf.write(filename, full_data, self.samplerate)
+            self.recorded_data = [] # Limpa para a próxima
             return filename
         return None
 
-    def _audio_callback(self, indata, frames, time, status):
+    def _audio_callback(self, indata, outdata, frames, time, status):
         if status:
             print(f"Audio status: {status}")
         
         # Processamento em tempo real
         processed = self.processor.process(indata)
+        
+        # Copia para a saída (monitoramento audível)
+        outdata[:] = processed
         
         # Calcula volume para o medidor
         self.current_volume = np.linalg.norm(processed) / np.sqrt(len(processed))

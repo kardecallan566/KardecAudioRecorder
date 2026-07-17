@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         # 4. Editor Integrado (Inicia oculto)
         self.editor_widget = AudioEditor()
         self.editor_widget.hide()
+        self.editor_widget.close_btn.clicked.connect(self.close_editor)
         center_panel.addWidget(self.editor_widget)
 
     def apply_styles(self):
@@ -162,19 +163,29 @@ class MainWindow(QMainWindow):
 
     def toggle_recording(self):
         if not self.audio_engine.is_recording:
+            # Se não estiver monitorando, inicia para capturar áudio
+            if not self.audio_engine.is_monitoring:
+                self.toggle_monitoring()
+                
             self.audio_engine.start_recording()
             self.record_btn.setText("Finalizar Gravação")
-            self.record_btn.setStyleSheet(f"background-color: #FF4444;")
+            self.record_btn.setStyleSheet("background-color: #FF4444; color: white;")
         else:
-            filename = "gravacao_teste.wav" # Simplificado
-            self.audio_engine.stop_recording(filename)
-            self.record_btn.setText("Iniciar Gravação")
-            self.record_btn.setStyleSheet(f"background-color: {COLOR_EMERALD};")
+            import os
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+            filename = f"Gravacao_{timestamp}.wav"
             
-            # Abre o editor
-            self.editor_widget.load_audio(filename)
-            self.editor_widget.show()
-            self.plot_widget.hide() # Esconde monitoramento em tempo real
+            filepath = self.audio_engine.stop_recording(filename)
+            self.record_btn.setText("Iniciar Gravação")
+            self.record_btn.setStyleSheet(f"background-color: {COLOR_EMERALD}; color: {COLOR_BACKGROUND};")
+            
+            if filepath and os.path.exists(filepath):
+                # Abre o editor
+                self.editor_widget.load_audio(filepath)
+                self.editor_widget.show()
+                self.plot_widget.hide() # Esconde monitoramento em tempo real
+                self.test_btn.setEnabled(False) # Desabilita teste enquanto edita
 
     def on_gain_changed(self, value):
         self.audio_engine.processor.update_param("gain", value / 100.0)
@@ -189,6 +200,13 @@ class MainWindow(QMainWindow):
             # Atualiza UI se necessário
             self.filters["Redução de Ruído"].setChecked(profile["noise_reduction"] > 0)
             self.filters["Compressor"].setChecked(profile["compressor"])
+
+    def close_editor(self):
+        self.editor_widget.hide()
+        self.plot_widget.show()
+        self.test_btn.setEnabled(True)
+        import sounddevice as sd
+        sd.stop() # Para qualquer reprodução
 
     def on_filter_toggled(self, name, state):
         # Mapeamento simples
@@ -205,6 +223,9 @@ class MainWindow(QMainWindow):
         if self.audio_engine.is_monitoring:
             data = self.audio_engine.get_latest_data()
             if len(data) > 0:
+                # Achata o array para (N,) caso seja (N, 1)
+                if len(data.shape) > 1 and data.shape[1] == 1:
+                    data = data.flatten()
                 # Mostra apenas os últimos 1000 pontos para performance
                 self.curve.setData(data[-1000:])
                 
